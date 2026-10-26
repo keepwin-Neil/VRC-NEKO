@@ -1,6 +1,6 @@
 # VRC-NEKO · YUI 世界 NPC
 
-基于 Project N.E.K.O 的非官方 VRChat 世界 NPC 集成原型。目标是让 AI 角色在世界里交流、移动、表达身体动作，并根据地图作者提供的语义和导航约束行动。
+VRC-NEKO 是 **Project N.E.K.O 的官方附属项目**，面向 VRChat 世界 NPC 集成。目标是让 AI 角色在世界里交流、移动、表达身体动作，并根据地图作者提供的语义和导航约束行动。本项目由 [keepwin-Neil](https://github.com/keepwin-Neil) 的个人 GitHub 账号发布，目前由其持续维护。
 
 这是 **0.5.19 本地工程的公开源码整理版**（整理日期：2026-10-26），包含插件、协议、控制面板、Unity/Udon C# 源码及自动测试。它处于持续联调阶段，**不是完整地图、可直接导入的角色包或已经完成多人验收的成品**。
 
@@ -23,17 +23,15 @@ flowchart LR
 
 动作生成模型使用 [NVIDIA ARDY 官方实现](https://github.com/nv-tlabs/ardy)。本仓库只保留连接该后端的服务适配层，**不重新发布 ARDY 模型、权重、上游完整代码或修改后的上游覆盖文件**。模型、文本编码器及其授权由使用者从原始发布方获取。
 
-## 我本人负责的部分与贡献边界
+## 发布与维护
 
-本仓库维护者是 [keepwin-Neil](https://github.com/keepwin-Neil)，项目与 [ggg233m](https://github.com/ggg233m) 合作开发。**N.E.K.O 官方是上游基础项目；ggg233m 是合作开发者。** 本人负责世界 NPC 方案的需求定义、功能取舍、组织 Unity 世界整合与本机部署联调、提供使用反馈及整理公开版本；具体实现和配置过程使用了大量 AI 辅助。
+本项目以 N.E.K.O 官方附属项目的身份发布，公开仓库位于个人账号 [keepwin-Neil/VRC-NEKO](https://github.com/keepwin-Neil/VRC-NEKO)，当前维护者为 [keepwin-Neil](https://github.com/keepwin-Neil)。
 
-本地工程中的工作范围包括：N.E.K.O 与世界事件的接入、独立动作意图与连续动作服务适配、字幕与玩家输入、空间语音及显式发言租约、控制面板、会话恢复和回归验证。上述范围是集成工作的说明，**不代表这些目录中的每行代码均由本人手写或从零原创**。
-
-YUI/VRChat 插件、协议与骨骼控制包含合作开发成果；N.E.K.O 官方提供主对话、记忆、TTS 和 SDK 基础，NVIDIA 提供外部动作模型。合作方贡献与外部项目成果均不归为本人独立研发。公开副本采用新的干净历史，尚未完成逐文件贡献整理；仓库首次提交的作者统计、代码重合或仓库所在账号，都不能单独用来判断贡献归属或上下游关系。详见 [来源与权利说明](THIRD_PARTY_NOTICES.md)。
+相关致谢集中列于本文的“致谢”部分，外部依赖、资源范围与许可说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## AI 辅助开发说明
 
-项目在代码实现、重构、测试、调试、文档和本次公开整理中使用了 AI 编程助手，包括 Codex。维护者提供目标、环境与反馈，并负责选择方案、验证行为及维护。AI 生成的代码与解释可能存在错误；自动测试、构建成功和 AI 的判断均不能替代 VRChat 实机、多人与长时间验收。
+项目在代码实现、重构、测试、调试、文档和本次公开整理中使用了 AI 编程助手，包括 Codex。AI 生成的代码与解释可能存在错误；自动测试、构建成功和 AI 的判断均不能替代 VRChat 实机、多人与长时间验收。
 
 ## 当前状态与已知问题
 
@@ -118,14 +116,12 @@ python scripts/check_public_release.py --all-history
 
 ## 致谢
 
-- [ggg233m](https://github.com/ggg233m)：项目合作开发者，感谢其在 YUI/VRChat NPC 合作开发中的贡献；相关工作见 [VRChat body 插件](https://github.com/ggg233m/n.e.k.o_plugin_vrc_body) 与 [YUI NPC Controller](https://github.com/ggg233m/n.e.k.o_plugin_vrc_npc_controller)。
-- [Project N.E.K.O](https://github.com/Project-N-E-K-O) 和 [N.E.K.O 仓库](https://github.com/Project-N-E-K-O/N.E.K.O)：上游基础项目，提供对话、记忆、语音及插件生态。
-- [wehos](https://github.com/wehos)：感谢其在 N.E.K.O 及相关生态的工作；本仓库不将其上游成果或协作方 PR 归为维护者个人贡献。
+- [ggg233m](https://github.com/ggg233m)：感谢对本项目的支持与贡献；相关项目见 [VRChat body 插件](https://github.com/ggg233m/n.e.k.o_plugin_vrc_body) 与 [YUI NPC Controller](https://github.com/ggg233m/n.e.k.o_plugin_vrc_npc_controller)。
+- [Project N.E.K.O 团队](https://github.com/Project-N-E-K-O) 和 [N.E.K.O 项目](https://github.com/Project-N-E-K-O/N.E.K.O)：感谢对本项目的支持及相关生态建设。
+- [wehos](https://github.com/wehos)：感谢在 N.E.K.O 及相关生态中的贡献。
 - [NVIDIA ARDY 作者及团队](https://github.com/nv-tlabs/ardy)：提供动作生成研究与官方实现；代码和模型资源分别适用各自的许可。
 - VRChat、UdonSharp、Unity，以及 MIDI、语音和依赖工具的作者与社区。
 
-本项目不代表上述团队的官方产品、背书或共同发布。
-
 ## 权利与许可
 
-保留合作开发者、官方上游及外部依赖的归属，以及 `host/licenses/` 中的声明。N.E.K.O 官方代码按其适用许可证处理；本仓库合作成果的公开范围、署名和统一许可证安排仍需由相关贡献者确认，不能据此将全部源码视为已经统一采用 MIT/Apache 许可。**公开可见不等于获得任意复制、再分发或商用授权**；复用前应确认相关权利人的授权范围。详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+项目的版权署名与许可证遵循 N.E.K.O 官方的发布安排，外部依赖保留各自的版权和许可声明，包括 `host/licenses/` 中的材料。本仓库目前未为全部源码统一标注 MIT/Apache 许可；具体使用、修改、再分发和商用条件，以适用的许可证与官方发布说明为准。详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
