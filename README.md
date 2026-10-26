@@ -25,11 +25,11 @@ flowchart LR
 
 ## 我本人负责的部分与贡献边界
 
-本仓库维护者是 [keepwin-Neil](https://github.com/keepwin-Neil)。本人负责世界 NPC 方案的需求定义、功能取舍、组织 Unity 世界整合与本机部署联调、提供使用反馈及决定公开范围；具体实现和配置过程使用了大量 AI 辅助，也建立在上游已有插件和控制协议的基础上。
+本仓库维护者是 [keepwin-Neil](https://github.com/keepwin-Neil)，项目与 [ggg233m](https://github.com/ggg233m) 合作开发。**N.E.K.O 官方是上游基础项目；ggg233m 是合作开发者。** 本人负责世界 NPC 方案的需求定义、功能取舍、组织 Unity 世界整合与本机部署联调、提供使用反馈及整理公开版本；具体实现和配置过程使用了大量 AI 辅助。
 
 本地工程中的工作范围包括：N.E.K.O 与世界事件的接入、独立动作意图与连续动作服务适配、字幕与玩家输入、空间语音及显式发言租约、控制面板、会话恢复和回归验证。上述范围是集成工作的说明，**不代表这些目录中的每行代码均由本人手写或从零原创**。
 
-上游 YUI/VRChat 插件、协议与骨骼控制提供了重要基础；N.E.K.O 的主对话、记忆、TTS 和 SDK，以及 NVIDIA 的基础动作模型，不属于本人独立研发成果。公开副本采用新的干净历史，旧工程与上游之间尚未完成逐文件贡献溯源，不能用本仓库首次提交的作者统计判断原创归属。详见 [来源与权利说明](THIRD_PARTY_NOTICES.md)。
+YUI/VRChat 插件、协议与骨骼控制包含合作开发成果；N.E.K.O 官方提供主对话、记忆、TTS 和 SDK 基础，NVIDIA 提供外部动作模型。合作方贡献与外部项目成果均不归为本人独立研发。公开副本采用新的干净历史，尚未完成逐文件贡献整理；仓库首次提交的作者统计、代码重合或仓库所在账号，都不能单独用来判断贡献归属或上下游关系。详见 [来源与权利说明](THIRD_PARTY_NOTICES.md)。
 
 ## AI 辅助开发说明
 
@@ -118,8 +118,8 @@ python scripts/check_public_release.py --all-history
 
 ## 致谢
 
-- [ggg233m](https://github.com/ggg233m)：感谢其 [VRChat body 插件](https://github.com/ggg233m/n.e.k.o_plugin_vrc_body) 与 [YUI NPC Controller](https://github.com/ggg233m/n.e.k.o_plugin_vrc_npc_controller) 的基础工作与公开资料。
-- [Project N.E.K.O](https://github.com/Project-N-E-K-O) 和 [N.E.K.O 仓库](https://github.com/Project-N-E-K-O/N.E.K.O)：提供对话、记忆、语音及插件生态。
+- [ggg233m](https://github.com/ggg233m)：项目合作开发者，感谢其在 YUI/VRChat NPC 合作开发中的贡献；相关工作见 [VRChat body 插件](https://github.com/ggg233m/n.e.k.o_plugin_vrc_body) 与 [YUI NPC Controller](https://github.com/ggg233m/n.e.k.o_plugin_vrc_npc_controller)。
+- [Project N.E.K.O](https://github.com/Project-N-E-K-O) 和 [N.E.K.O 仓库](https://github.com/Project-N-E-K-O/N.E.K.O)：上游基础项目，提供对话、记忆、语音及插件生态。
 - [wehos](https://github.com/wehos)：感谢其在 N.E.K.O 及相关生态的工作；本仓库不将其上游成果或协作方 PR 归为维护者个人贡献。
 - [NVIDIA ARDY 作者及团队](https://github.com/nv-tlabs/ardy)：提供动作生成研究与官方实现；代码和模型资源分别适用各自的许可。
 - VRChat、UdonSharp、Unity，以及 MIDI、语音和依赖工具的作者与社区。
@@ -128,4 +128,4 @@ python scripts/check_public_release.py --all-history
 
 ## 权利与许可
 
-保留已知上游归属及 `host/licenses/` 中的声明。原工程与已检查的 NPC 上游根目录未见适用于全部文件的统一 LICENSE，本次没有擅自给全部代码添加 MIT/Apache 许可，也未重新授权第三方内容。**公开可见不等于获得任意复制、再分发或商用授权**；复用前应确认相关权利人的授权范围。详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+保留合作开发者、官方上游及外部依赖的归属，以及 `host/licenses/` 中的声明。N.E.K.O 官方代码按其适用许可证处理；本仓库合作成果的公开范围、署名和统一许可证安排仍需由相关贡献者确认，不能据此将全部源码视为已经统一采用 MIT/Apache 许可。**公开可见不等于获得任意复制、再分发或商用授权**；复用前应确认相关权利人的授权范围。详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
