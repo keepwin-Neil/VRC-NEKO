@@ -1,0 +1,121 @@
+[plugin_runtime]
+enabled = true
+auto_start = false
+startup_failure = "fail"
+
+[yui]
+# 与世界端约定的 MIDI 输出端口。
+midi_port = "NEKO_MIDI"
+claim_code = 4321
+
+# 留空时自动跟随当前用户最新的 VRChat output_log。
+log_path = ""
+log_directory = ""
+log_from_end = true
+log_poll_interval_s = 0.05
+
+ack_timeout_s = 2.0
+command_deadline_s = 5.0
+heartbeat_interval_s = 1.0
+
+# 默认只允许世界目录锚点导航；坐标工具必须显式开启。
+free_coordinate_navigation = false
+
+# 默认不把玩家显示名交给模型，只使用会话级 player_slot。
+include_player_names = false
+
+# 可选工具；只映射为 SET_MODE wander，不接受任何参数。
+enable_wander_tool = false
+
+# 本插件只面向 NEKO Home/YUI 世界，默认把主 LLM 已完成的回答显示到 NPC 头顶。
+# 普通回合只读 current character 的 recent.json；世界输入产生的主动回合只读补充
+# 宿主已有 proactive_reply 记录。不扩展协议，也不回写任何聊天存储。
+[yui.chat_bridge]
+enabled = true
+source = "recent_file"
+poll_interval_s = 0.5
+# 短句约 10 秒；长文字按每秒 8 字加 6 秒估算，总时长最多 25 秒。
+display_seconds = 10
+max_pages = 4
+max_file_bytes = 2097152
+
+# 实时 TTS 只送到 YUI 世界音源；需要安装前端桥接与 FFmpeg。
+# 世界未连接/播放器未播放时，不转发桌面聊天音频。
+[yui.voice]
+enabled = false
+character = "YUI"
+ingest_port = 17863
+stream_port = 17864
+max_queue_seconds = 3.0
+max_listeners = 8
+public_tunnel = false
+
+# 世界内本地跟随式输入 UI。只有玩家点击发送产生的 player.chat_submit 才会触发
+# 宿主主 LLM；自主、社交和失败事件仍不会触发聊天或 TTS。
+[yui.player_chat]
+enabled = true
+max_chars = 144
+cooldown_s = 2.0
+
+# 玩家在地图中主动开始/结束发言后，识别 VRChat 进程播放的声音。
+# 默认关闭；不持续录音，不读取游戏内存，不采集全桌面或主机麦克风。
+[yui.speech_input]
+enabled = false
+culture = "zh-CN"
+max_capture_s = 12
+minimum_confidence = 0.45
+
+[yui.autonomy]
+proactive_chat_enabled = true
+# 仅为已验收语义地图和 operation lifecycle 的配置档显式开启。
+enabled = true
+auto_connect = true
+decision_interval_s = 1
+resume_delay_s = 8
+# 自主移动的日常步行速度；正式世界 Walk 动画区间不超过 1.2m/s。
+walk_speed_mps = 1.0
+dwell_range_s = [8, 20]
+explore_range_s = [15, 35]
+social_cooldown_s = 60
+llm_inspiration_range_s = [180, 360]
+
+# 玩家从世界输入框发言后，NPC 暂停生活片段并留在当前发言者附近。
+[yui.autonomy.chat_engagement]
+enabled = true
+near_distance_m = 2.5
+follow_trigger_m = 3.0
+approach_distance_m = 1.5
+post_reply_hold_s = 60
+no_reply_timeout_s = 90
+approach_retry_s = 10
+
+# 独立意图模型不使用宿主回复/TTS通道。通过面板输入密钥写入本机配置；
+# 不把真实密钥提交到仓库。环境变量作为备用。聊天上下文只读取得。
+[yui.autonomy.intent_model]
+enabled = true
+# 留空表示不配置中转站，意图模型不会启用。要接入 OpenAI 兼容中转站，
+# 填写完整的 https chat/completions 地址，例如
+# "https://example.com/v1/chat/completions"。
+endpoint = ""
+model = "gemini-3.7-flash"
+api_key_env = "TEST_API"
+api_key = ""
+persona_prompt = "你是友好、好奇且会自然安排生活片段的世界 NPC。"
+timeout_s = 20
+min_interval_s = 30
+max_output_tokens = 700
+
+# 只读 N.E.K.O 当前角色的 memory/<角色>/recent.json；不订阅 conversations 总线。
+[yui.autonomy.intent_model.chat_context]
+enabled = true
+source = "recent_file"
+max_turns = 6
+max_chars = 6000
+poll_interval_s = 1
+max_file_bytes = 2097152
+
+# 与 yui.ardy.enabled 互斥；不需要启动 ARDY 服务。
+[yui.vmc]
+enabled = false
+host_api_url = "http://127.0.0.1:48911"
+listen_port = 39540

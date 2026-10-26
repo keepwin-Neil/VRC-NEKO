@@ -1,0 +1,917 @@
+"""宿主常驻自主循环、语义路线和控制仲裁测试。"""
+
+from __future__ import annotations
+
+import asyncio
+from collections import deque
+import random
+import threading
+import time
+import unittest
+
+import _bootstrap  # noqa: F401
+from yui_npc_controller.runtime.autonomy import (
+    AutonomyDirector,
+    NoopAutonomyStimulusProvider,
+)
+from yui_npc_controller.runtime.chat_context import ChatContextUpdate
+from yui_npc_controller.runtime.behavior_plan import BehaviorGraphCompiler
+from yui_npc_controller.runtime.config import YuiAutonomyConfig
+
+
+class FakeClock:
+    def __init__(self) -> None:
+        self.value = 0.0
+
+    def __call__(self) -> float:
+        return self.value
+
+    def advance(self, seconds: float) -> None:
+        self.value += seconds
+
+
+class FakeSession:
+    def __init__(self) -> None:
+        self._condition = threading.Condition(threading.RLock())
+        self._listeners = []
+        self.session = 9
+        self.discovery_ready = True
+        self.control_state = "external"
+        self.estop = False
+        self.operation_lifecycle = True
+        self.local_navigation = True
+        self.max_speed_mps = 2.0
+        self.capabilities = (
+            "goto",
+            "navmesh",
+            "anchors",
+            "world_map",
+            "semantic_navigation",
+            "operation_lifecycle",
+            "local_navigation",
+        )
+        self.players = {2: {"slot": 2, "d": 3.0}}
+        self.operations = {}
+        self.npc_state = {
+            "active_ops": [],
+            "location": {
+                "localized": True,
+                "region_key": "a",
+                "nearest_anchor": {"semantic_key": "a0", "d": 0.1, "brg": 0},
+            },
+        }
+        self.catalogs = {
+            "anchor": {
+                0: {"id": 0, "semantic_key": "a0", "region_key": "a", "tags": ["quiet"]},
+                1: {"id": 1, "semantic_key": "b0", "region_key": "b", "tags": ["view"]},
+                2: {"id": 2, "semantic_key": "c0", "region_key": "c", "tags": ["social"]},
+            },
+            "region": {
+                0: {"id": 0, "semantic_key": "a", "entry_anchor_id": 0, "explorable": True},
+                1: {"id": 1, "semantic_key": "b", "entry_anchor_id": 1, "explorable": True},
+                2: {"id": 2, "semantic_key": "c", "entry_anchor_id": 2, "explorable": True},
+            },
+            "route_edge": {
+                0: {"from_anchor_id": 0, "to_anchor_id": 1, "bidirectional": True},
+                1: {"from_anchor_id": 1, "to_anchor_id": 2, "bidirectional": True},
+            },
+            "action": {
+                0: {"semantic_key": "greet"},
+                1: {"semantic_key": "greet_wave"},
+                2: {"semantic_key": "listen"},
+                3: {"semantic_key": "agree_nod"},
+            },
+            "entity": {},
+        }
+
+    def add_event_listener(self, listener):
+        self._listeners.append(listener)
+
+    def remove_event_listener(self, listener):
+        if listener in self._listeners:
+            self._listeners.remove(listener)
+
+    def emit(self, event):
+        for listener in tuple(self._listeners):
+            listener(dict(event))
+            director = getattr(listener, "__self__", None)
+            if isinstance(director, AutonomyDirector):
+                # 状态机用例等待事件完成；另有真实线程用例检查尾读不能等待。
+                with director._event_condition:
+                    assert director._event_condition.wait_for(
+                        lambda: not director._session_events and not director._event_busy,
+                        timeout=2)
+
+
+class FakePlanManager:
+    def __init__(self) -> None:
+        self.submissions = []
+        self.statuses = {}
+        self.cancelled = []
+
+    def submit(self, graph, *, replace_active=False, origin="explicit"):
+        plan_id = f"plan-{len(self.submissions) + 1}"
+        self.submissions.append({
+            "plan_id": plan_id,
+            "graph": graph,
+            "replace_active": replace_active,
+            "origin": origin,
+        })
+        self.statuses[plan_id] = "accepted"
+        return {"plan_id": plan_id, "status": "accepted", "error": None}
+
+    def status(self, plan_id=None):
+        status = self.statuses.get(plan_id, "failed")
+        return {
+            "plan_id": plan_id,
+            "status": status,
+            "error": "plan_not_found" if status == "failed" and plan_id not in self.statuses else None,
+            "detail": None,
+        }
+
+    def cancel_origin(self, origin, reason, *, stop_domains=True):
+        self.cancelled.append((origin, reason, stop_domains))
+        for plan_id, status in list(self.statuses.items()):
+            if status not in {"succeeded", "failed", "cancelled", "unknown"}:
+                self.statuses[plan_id] = "cancelled"
+        return True
+
+
+class FakeAdapter:
+    def __init__(self) -> None:
+        self.plan_manager = FakePlanManager()
+        self.look_calls = []
+        self.clear_look_calls = 0
+
+    def look_at(self, **kwargs):
+        self.look_calls.append(dict(kwargs))
+        return {"status": "succeeded", "error": None}
+
+    def clear_look_wire(self):
+        self.clear_look_calls += 1
+        return {"status": "succeeded", "error": None}
+
+
+class FakeChatContextProvider:
+    def __init__(self, updates, turns) -> None:
+        self.config = type("ChatConfig", (), {"enabled": True})()
+        self.updates = deque(updates)
+        self.turns = list(turns)
+        self.character = "然然"
+
+    def poll(self):
+        if self.updates:
+            return self.updates.popleft()
+        return ChatContextUpdate(False, False, "same")
+
+    def context(self):
+        return {"source": "recent_file", "untrusted": True, "turns": list(self.turns)}
+
+    def status(self):
+        return {
+            "enabled": True,
+            "source": "recent_file",
+            "current_character": self.character,
+            "file_state": "available",
+            "turn_count": len(self.turns),
+            "revision": "same",
+        }
+
+
+class AutonomyTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.clock = FakeClock()
+        self.session = FakeSession()
+        self.adapter = FakeAdapter()
+        self.config = YuiAutonomyConfig(
+            enabled=True,
+            decision_interval_s=1.0,
+            resume_delay_s=8.0,
+            dwell_range_s=(8.0, 8.0),
+            explore_range_s=(15.0, 15.0),
+            social_cooldown_s=60.0,
+            llm_inspiration_range_s=(180.0, 180.0),
+        )
+        self.director = AutonomyDirector(
+            self.adapter,  # type: ignore[arg-type]
+            self.session,  # type: ignore[arg-type]
+            self.config,
+            rng=random.Random(1),
+            clock=self.clock,
+        )
+        # 单元测试直接驱动 tick，不启动后台线程。
+        self.director._desired_running = True
+        self.director._pause_reason = ""
+
+    def tearDown(self) -> None:
+        self.session.remove_event_listener(self.director._on_session_event)
+
+    def test_look_cleanup_preserves_new_owner(self) -> None:
+        self.director._owned_look_ids = frozenset({"old"})
+        self.session.operations["old"] = {"kind": "look", "status": "cancelled"}
+        self.session.operations["new"] = {"kind": "look", "status": "running"}
+        self.director._clear_owned_look()
+        self.assertEqual(self.adapter.clear_look_calls, 0)
+
+    def test_look_cleanup_releases_own_operation(self) -> None:
+        self.director._owned_look_ids = frozenset({"own"})
+        self.session.operations["own"] = {"kind": "look", "status": "running"}
+        self.director._clear_owned_look()
+        self.assertEqual(self.adapter.clear_look_calls, 1)
+
+    def test_autonomy_movement_defaults_to_walk_speed(self) -> None:
+        graph = {
+            "entry": "root",
+            "nodes": [
+                {"id": "root", "type": "sequence", "children": ["go", "near", "roam"]},
+                {"id": "go", "type": "navigate", "target_key": "b0"},
+                {"id": "near", "type": "approach", "player_slot": 2, "distance_m": 1.5},
+                {"id": "roam", "type": "move_relative", "bearing_deg": 0, "distance_m": 1},
+            ],
+        }
+        self.assertTrue(self.director._submit(
+            graph,
+            kind="test_walk",
+            targets=("b0",),
+            regions=("b",),
+            movement=True,
+            now=self.clock(),
+        ))
+        submitted = self.adapter.plan_manager.submissions[-1]["graph"]
+        movement = [node for node in submitted["nodes"] if node["type"] != "sequence"]
+        self.assertTrue(all(node["speed_mps"] == 1.0 for node in movement))
+        self.assertNotIn("speed_mps", graph["nodes"][1])
+
+    def test_noop_stimulus_provider_never_returns_visual_input(self) -> None:
+        result = asyncio.run(NoopAutonomyStimulusProvider().get_stimulus({"x": 1}))
+        self.assertIsNone(result)
+
+    def test_first_routine_is_visible_movement(self) -> None:
+        self.clock.advance(1.1)
+        self.director._tick()
+
+        submission = self.adapter.plan_manager.submissions[0]
+        node_types = {node.get("type") for node in submission["graph"]["nodes"]}
+        self.assertTrue({"navigate", "explore"} & node_types)
+        self.assertNotEqual(self.director.status()["active_kind"], "dwell")
+
+    def test_stale_watchdog_before_start_does_not_block_new_session(self) -> None:
+        self.director._desired_running = False
+        self.director._pause_reason = "not_started"
+
+        self.session.emit({"type": "sys.watchdog"})
+        self.assertEqual(self.director.status()["pause_reason"], "not_started")
+
+        self.director._desired_running = True
+        self.session.emit({"type": "sys.watchdog"})
+        self.assertFalse(self.director.status()["running"])
+        self.assertEqual(self.director.status()["pause_reason"], "watchdog")
+
+    def test_startup_safe_idle_has_bounded_grace_then_pauses(self) -> None:
+        self.session.control_state = "safe_idle"
+        self.director._startup_grace_until = 5.0
+
+        self.clock.advance(4.9)
+        self.director._tick()
+        self.assertTrue(self.director.status()["running"])
+
+        self.clock.advance(0.2)
+        self.director._tick()
+        self.assertFalse(self.director.status()["running"])
+        self.assertEqual(self.director.status()["pause_reason"], "watchdog")
+
+    def test_route_planner_uses_published_edges_and_waits_for_terminal(self) -> None:
+        self.director._movement_seconds = 0.0
+        self.director._dwell_seconds = 10.0
+        self.clock.advance(1.1)
+        self.director._tick()
+
+        self.assertEqual(len(self.adapter.plan_manager.submissions), 1)
+        submission = self.adapter.plan_manager.submissions[0]
+        self.assertEqual(submission["origin"], "autonomy")
+        nodes = submission["graph"]["nodes"]
+        route_targets = [node.get("target_key") for node in nodes if node.get("type") == "navigate"]
+        self.assertTrue(route_targets or any(node.get("type") == "explore" for node in nodes))
+
+        # accepted 不是完成；下一轮不得提交第二个计划。
+        self.clock.advance(2.0)
+        self.director._tick()
+        self.assertEqual(len(self.adapter.plan_manager.submissions), 1)
+
+        self.adapter.plan_manager.statuses[submission["plan_id"]] = "succeeded"
+        self.clock.advance(20.0)
+        self.director._tick()
+        self.assertGreaterEqual(self.director.status()["plans_completed"], 1)
+        self.assertTrue(
+            self.director.status()["recent_targets"]
+            or self.director.status()["recent_regions"]
+        )
+
+    def test_explicit_plan_preempts_and_resumes_only_after_terminal_plus_delay(self) -> None:
+        self.director._movement_seconds = 0.0
+        self.director._dwell_seconds = 10.0
+        self.clock.advance(1.1)
+        self.director._tick()
+        first_count = len(self.adapter.plan_manager.submissions)
+
+        self.director.before_explicit_tool("npc.navigate")
+        self.adapter.plan_manager.statuses["explicit"] = "running"
+        self.director.after_explicit_tool(
+            "npc.navigate", {"status": "accepted", "plan_id": "explicit"}
+        )
+        self.assertIn(("autonomy", "explicit_control", True), self.adapter.plan_manager.cancelled)
+
+        self.clock.advance(30.0)
+        self.director._tick()
+        self.assertEqual(len(self.adapter.plan_manager.submissions), first_count)
+        self.adapter.plan_manager.statuses["explicit"] = "succeeded"
+        self.director._tick()
+        self.clock.advance(7.9)
+        self.director._tick()
+        self.assertEqual(len(self.adapter.plan_manager.submissions), first_count)
+        self.clock.advance(0.2)
+        self.director._tick()
+        self.assertGreater(len(self.adapter.plan_manager.submissions), first_count)
+
+    def test_stop_and_estop_require_manual_restart(self) -> None:
+        self.director.before_explicit_tool("npc.stop")
+        self.director.after_explicit_tool("npc.stop", {"status": "succeeded"})
+        self.assertFalse(self.director.status()["running"])
+        self.assertEqual(self.director.status()["pause_reason"], "explicit_stop")
+
+        self.director._desired_running = True
+        self.session.estop = True
+        self.director._tick()
+        self.assertFalse(self.director.status()["running"])
+        self.assertEqual(self.director.status()["pause_reason"], "estop")
+
+    def test_social_event_is_rate_limited_per_player_and_preempts_routine(self) -> None:
+        self.director._movement_seconds = 0.0
+        self.director._dwell_seconds = 10.0
+        self.clock.advance(1.1)
+        self.director._tick()
+        self.session.emit({"type": "social.wave", "slot": 2})
+        self.session.emit({"type": "player.touch", "slot": 2})
+        self.assertEqual(self.director.status()["social_queue"], 1)
+
+        self.clock.advance(1.1)
+        self.director._tick()
+        latest = self.adapter.plan_manager.submissions[-1]
+        self.assertEqual(latest["replace_active"], True)
+        self.assertTrue(any(node.get("type") == "approach" for node in latest["graph"]["nodes"]))
+        self.assertEqual(self.director.status()["social_queue"], 0)
+
+    def test_chat_engagement_immediately_cancels_autonomy_and_suppresses_social(self) -> None:
+        self.clock.advance(1.1)
+        self.director._tick()
+        self.assertIsNotNone(self.director.status()["active_plan_id"])
+
+        self.assertTrue(self.director.begin_chat_engagement(2, reply_baseline_serial=4))
+
+        status = self.director.status()
+        self.assertEqual(status["state"], "chat_engaged")
+        self.assertIsNone(status["active_plan_id"])
+        self.assertEqual(status["chat_engagement"]["player_slot"], 2)
+        self.assertIn(
+            ("autonomy", "chat_engagement", True),
+            self.adapter.plan_manager.cancelled,
+        )
+        self.session.emit({"type": "social.wave", "slot": 2})
+        self.assertEqual(self.director.status()["social_queue"], 0)
+
+    def test_chat_engagement_uses_distance_hysteresis_and_walks_when_far(self) -> None:
+        self.session.players[2]["d"] = 2.4
+        self.assertTrue(self.director.begin_chat_engagement(2))
+        self.director._tick()
+        self.assertEqual(self.director.status()["chat_engagement"]["distance_band"], "near")
+        self.assertEqual(len(self.adapter.plan_manager.submissions), 0)
+        self.assertEqual(self.adapter.look_calls[-1]["player_slot"], 2)
+
+        self.session.players[2]["d"] = 2.8
+        self.clock.advance(1.1)
+        self.director._tick()
+        self.assertEqual(
+            self.director.status()["chat_engagement"]["distance_band"],
+            "hysteresis",
+        )
+        self.assertEqual(len(self.adapter.plan_manager.submissions), 0)
+
+        self.session.players[2]["d"] = 3.1
+        self.clock.advance(1.1)
+        self.director._tick()
+        submission = self.adapter.plan_manager.submissions[-1]
+        approach = submission["graph"]["nodes"][0]
+        self.assertEqual(approach["type"], "approach")
+        self.assertEqual(approach["distance_m"], 1.5)
+        self.assertEqual(approach["speed_mps"], 1.0)
+        self.assertEqual(self.director.status()["active_kind"], "chat_engagement")
+
+        self.adapter.plan_manager.statuses[submission["plan_id"]] = "succeeded"
+        self.session.players[2]["d"] = 1.5
+        self.clock.advance(1.1)
+        self.director._tick()
+        self.assertIsNone(self.director.status()["active_plan_id"])
+        self.assertTrue(self.director._chat_engagement.look_owned)  # type: ignore[union-attr]
+
+    def test_final_reply_clear_starts_full_post_reply_hold(self) -> None:
+        self.assertTrue(self.director.begin_chat_engagement(2, reply_baseline_serial=3))
+        self.assertFalse(self.director.note_reply_page({
+            "reply_serial": 3,
+            "reply_end": True,
+            "display_seconds": 15,
+            "transfer_sequence": 8,
+        }))
+        self.assertTrue(self.director.note_reply_page({
+            "reply_serial": 4,
+            "reply_end": False,
+            "display_seconds": 15,
+            "transfer_sequence": 9,
+        }))
+        self.assertTrue(self.director.note_reply_page({
+            "reply_serial": 4,
+            "reply_end": True,
+            "display_seconds": 20,
+            "transfer_sequence": 10,
+        }))
+        self.session.emit({
+            "type": "npc.text_cleared",
+            "transfer_seq": 9,
+            "reason": "expired",
+        })
+        self.assertEqual(
+            self.director.status()["chat_engagement"]["phase"],
+            "final_reply_displaying",
+        )
+        self.session.emit({
+            "type": "npc.text_cleared",
+            "transfer_seq": 10,
+            "reason": "replaced",
+        })
+        self.assertEqual(
+            self.director.status()["chat_engagement"]["phase"],
+            "final_reply_displaying",
+        )
+        self.session.emit({
+            "type": "npc.text_cleared",
+            "transfer_seq": 10,
+            "reason": "expired",
+        })
+        self.assertEqual(
+            self.director.status()["chat_engagement"]["phase"],
+            "post_reply_hold",
+        )
+        self.clock.advance(59.9)
+        self.director._tick()
+        self.assertTrue(self.director.status()["chat_engagement"]["active"])
+        self.clock.advance(0.2)
+        self.director._tick()
+        self.assertFalse(self.director.status()["chat_engagement"]["active"])
+        self.assertEqual(
+            self.director.status()["chat_engagement"]["last_outcome"],
+            "post_reply_hold_complete",
+        )
+
+    def test_chat_engagement_has_bounded_fallbacks(self) -> None:
+        self.assertTrue(self.director.begin_chat_engagement(2))
+        self.clock.advance(90.1)
+        self.director._tick()
+        self.assertFalse(self.director.status()["chat_engagement"]["active"])
+        self.assertEqual(
+            self.director.status()["chat_engagement"]["last_outcome"],
+            "no_reply_timeout",
+        )
+
+        self.assertTrue(self.director.begin_chat_engagement(2))
+        self.assertTrue(self.director.note_reply_page({
+            "reply_serial": 1,
+            "reply_end": True,
+            "display_seconds": 20,
+            "transfer_sequence": 11,
+        }))
+        self.clock.advance(79.9)
+        self.director._tick()
+        self.assertTrue(self.director.status()["chat_engagement"]["active"])
+        self.clock.advance(0.2)
+        self.director._tick()
+        self.assertFalse(self.director.status()["chat_engagement"]["active"])
+        self.assertEqual(
+            self.director.status()["chat_engagement"]["last_outcome"],
+            "reply_clear_fallback",
+        )
+
+    def test_chat_timeout_cancels_an_in_flight_chat_approach(self) -> None:
+        self.session.players[2]["d"] = 4.0
+        self.assertTrue(self.director.begin_chat_engagement(2))
+        self.director._tick()
+        self.assertEqual(self.director.status()["active_kind"], "chat_engagement")
+
+        self.clock.advance(90.1)
+        self.director._tick()
+
+        self.assertIsNone(self.director.status()["active_plan_id"])
+        self.assertFalse(self.director.status()["chat_engagement"]["active"])
+        self.assertIn(
+            ("autonomy", "chat_engagement_no_reply_timeout", True),
+            self.adapter.plan_manager.cancelled,
+        )
+        self.assertEqual(self.adapter.clear_look_calls, 1)
+
+    def test_explicit_movement_ends_chat_but_same_player_approach_keeps_it(self) -> None:
+        self.assertTrue(self.director.begin_chat_engagement(2))
+        self.director.before_explicit_tool("npc.approach", {"player_slot": 2})
+        self.assertTrue(self.director.status()["chat_engagement"]["active"])
+
+        self.director.after_explicit_tool("npc.approach", {"status": "succeeded"})
+        self.clock.advance(8.1)
+        self.director._tick()
+        self.assertTrue(self.director.status()["chat_engagement"]["active"])
+
+        self.director.before_explicit_tool("npc.navigate", {"target_key": "b0"})
+        self.assertFalse(self.director.status()["chat_engagement"]["active"])
+        self.assertEqual(
+            self.director.status()["chat_engagement"]["last_outcome"],
+            "explicit_movement",
+        )
+
+        self.assertTrue(self.director.begin_chat_engagement(2))
+        self.director.before_explicit_tool("npc.execute_plan", {
+            "graph": {
+                "entry": "look",
+                "nodes": [{
+                    "id": "look",
+                    "type": "look_at",
+                    "player_slot": 2,
+                    "duration_ms": 1000,
+                }],
+            },
+        })
+        self.assertTrue(self.director.status()["chat_engagement"]["active"])
+
+        self.director.before_explicit_tool("npc.execute_plan", {
+            "graph": {
+                "entry": "go",
+                "nodes": [{"id": "go", "type": "navigate", "target_key": "b0"}],
+            },
+        })
+        self.assertFalse(self.director.status()["chat_engagement"]["active"])
+
+    def test_player_leave_and_pause_clear_chat_engagement_and_owned_look(self) -> None:
+        self.assertTrue(self.director.begin_chat_engagement(2))
+        self.director._tick()
+        self.assertTrue(self.director._chat_engagement.look_owned)  # type: ignore[union-attr]
+        self.session.players.pop(2)
+        self.session.emit({"type": "player.leave", "slot": 2})
+        self.assertFalse(self.director.status()["chat_engagement"]["active"])
+        self.assertEqual(self.adapter.clear_look_calls, 1)
+
+        self.session.players[2] = {"slot": 2, "d": 2.0}
+        self.assertTrue(self.director.begin_chat_engagement(2))
+        self.director._tick()
+        self.director.pause("manual_pause")
+        self.assertFalse(self.director.status()["chat_engagement"]["active"])
+        self.assertEqual(self.adapter.clear_look_calls, 2)
+
+    def test_failed_target_enters_bounded_backoff(self) -> None:
+        self.director._movement_seconds = 0.0
+        self.director._dwell_seconds = 10.0
+        self.clock.advance(1.1)
+        self.director._tick()
+        submitted = self.adapter.plan_manager.submissions[-1]
+        self.adapter.plan_manager.statuses[submitted["plan_id"]] = "failed"
+        self.clock.advance(2.0)
+        self.director._tick()
+        blacklist = self.director.status()["blacklist"]
+        self.assertTrue(blacklist)
+        self.assertTrue(all(0.0 < seconds <= 300.0 for seconds in blacklist.values()))
+
+    def test_model_preference_survives_completed_fragment_and_drives_followup(self) -> None:
+        director = self.director
+        director._latest_intent_token = "preference-test"
+        self.assertTrue(director.offer_intent({
+            "motivation": "持续关注窗边", "mood": "quiet",
+            "activities": [{"kind": "linger", "duration_s": 5}, {"kind": "linger", "duration_s": 5}],
+            "interests": [{"target_key": "b0", "strength": 0.9, "ttl_s": 120}],
+            "avoid_targets": ["c0"], "ttl_s": 240,
+        }, "preference-test"))
+        director._activate_pending_intent(self.clock())
+        for _ in range(2):
+            self.assertTrue(director._submit_intent_activity(self.clock()))
+            plan_id = self.adapter.plan_manager.submissions[-1]["plan_id"]
+            self.adapter.plan_manager.statuses[plan_id] = "succeeded"
+            self.clock.advance(6)
+            director._update_active(self.clock())
+        self.assertIsNone(director._intent)
+        self.assertEqual(director._intent_context("fragment_completed")["current_preference"]["motivation"], "持续关注窗边")
+        self.assertTrue(director._submit_preference_activity(self.clock()))
+        self.assertEqual(director._active.kind, "preference_visit")
+        self.assertEqual(director._active.targets, ("b0",))
+        graph = self.adapter.plan_manager.submissions[-1]["graph"]
+        self.assertTrue(any(node.get("target_key") == "b0" for node in graph["nodes"]))
+        self.assertTrue(director._blacklisted("c0", self.clock()))
+        director.pause("manual_pause")
+        self.assertIsNone(director.status()["current_preference"])
+        self.assertFalse(director._submit_preference_activity(self.clock()))
+
+    def test_model_mood_changes_followup_nodes_and_expires(self) -> None:
+        durations = {}
+        for mood in ("quiet", "playful"):
+            director = self.director
+            director._latest_intent_token = mood
+            self.assertTrue(director.offer_intent({
+                "motivation": "测试不同活动节奏", "mood": mood,
+                "activities": [{"kind": "linger", "duration_s": 5}, {"kind": "linger", "duration_s": 5}],
+                "ttl_s": 60,
+            }, mood))
+            director._activate_pending_intent(self.clock())
+            director._intent = None
+            self.assertTrue(director._submit_preference_activity(self.clock()))
+            nodes = self.adapter.plan_manager.submissions[-1]["graph"]["nodes"]
+            durations[mood] = next(node["duration_ms"] for node in nodes if node["id"] == "linger")
+            self.assertEqual(any(node["type"] == "move_relative" for node in nodes), mood == "playful")
+        self.assertEqual(durations, {"quiet": 20000, "playful": 8000})
+        self.clock.advance(61)
+        self.assertFalse(self.director._submit_preference_activity(self.clock()))
+        self.assertIsNone(self.director.status()["current_preference"])
+
+    def test_llm_fragment_waits_for_current_terminal_then_drives_exact_target(self) -> None:
+        requests = []
+        director = AutonomyDirector(
+            self.adapter,  # type: ignore[arg-type]
+            self.session,  # type: ignore[arg-type]
+            self.config,
+            inspiration_callback=lambda request: requests.append(request),
+            rng=random.Random(2),
+            clock=self.clock,
+        )
+        director._desired_running = True
+        director._pause_reason = ""
+        try:
+            self.clock.advance(1.1)
+            director._tick()
+            self.assertEqual(requests[0]["reason"], "startup")
+            fallback = self.adapter.plan_manager.submissions[-1]
+            accepted = director.offer_intent(
+                {
+                    "motivation": "想去更远的社交角看看，再安静待一会儿。",
+                    "mood": "quiet",
+                    "activities": [
+                        {"kind": "visit", "target_key": "c0", "duration_s": 8},
+                        {"kind": "linger", "tags": ["quiet"], "duration_s": 10},
+                    ],
+                    "avoid_targets": [],
+                    "ttl_s": 240,
+                },
+                requests[0]["request_token"],
+            )
+            self.assertTrue(accepted)
+
+            # 当前规则活动仍未终态，LLM 意图不能突然改向。
+            self.clock.advance(2.0)
+            director._tick()
+            self.assertEqual(self.adapter.plan_manager.submissions[-1], fallback)
+
+            self.adapter.plan_manager.statuses[fallback["plan_id"]] = "succeeded"
+            self.clock.advance(8.0)
+            director._tick()
+            intent_plan = self.adapter.plan_manager.submissions[-1]
+            targets = [
+                node.get("target_key")
+                for node in intent_plan["graph"]["nodes"]
+                if node.get("type") == "navigate"
+            ]
+            self.assertIn("c0", targets)
+            self.assertTrue(any(
+                node.get("type") == "wait" for node in intent_plan["graph"]["nodes"]
+            ))
+            BehaviorGraphCompiler(self.session).compile(intent_plan["graph"])
+            self.assertEqual(director.status()["last_decision_reason"], "llm_exact_target")
+            self.assertFalse(director.status()["fallback_active"])
+        finally:
+            self.session.remove_event_listener(director._on_session_event)
+
+    def test_chat_revision_is_injected_and_requests_new_intent(self) -> None:
+        requests = []
+        provider = FakeChatContextProvider(
+            [ChatContextUpdate(True, False, "new-revision")],
+            [{"user": "最近对窗边很感兴趣", "assistant": "可以过去看看"}],
+        )
+        director = AutonomyDirector(
+            self.adapter,  # type: ignore[arg-type]
+            self.session,  # type: ignore[arg-type]
+            self.config,
+            inspiration_callback=requests.append,
+            chat_context_provider=provider,  # type: ignore[arg-type]
+            clock=self.clock,
+        )
+        director._desired_running = True
+        director._pause_reason = ""
+        try:
+            self.clock.advance(1.1)
+            director._tick()
+            self.assertEqual(requests[-1]["reason"], "chat_updated")
+            recent = requests[-1]["context"]["recent_conversation"]
+            self.assertTrue(recent["untrusted"])
+            self.assertEqual(recent["turns"][0]["user"], "最近对窗边很感兴趣")
+            self.assertEqual(director.status()["chat_context"]["current_character"], "然然")
+        finally:
+            self.session.remove_event_listener(director._on_session_event)
+
+    def test_character_switch_invalidates_old_intent_token(self) -> None:
+        requests = []
+        provider = FakeChatContextProvider(
+            [ChatContextUpdate(False, False, "old")],
+            [{"user": "旧角色聊天", "assistant": "旧回答"}],
+        )
+        director = AutonomyDirector(
+            self.adapter,  # type: ignore[arg-type]
+            self.session,  # type: ignore[arg-type]
+            self.config,
+            inspiration_callback=requests.append,
+            chat_context_provider=provider,  # type: ignore[arg-type]
+            clock=self.clock,
+        )
+        director._desired_running = True
+        director._request_intent("startup")
+        stale_token = requests[-1]["request_token"]
+        provider.character = "新角色"
+        provider.turns = []
+        provider.updates.append(ChatContextUpdate(True, True, None))
+        try:
+            director._poll_chat_context()
+            director._request_intent("character_changed")
+            self.assertFalse(director.offer_intent({
+                "motivation": "旧角色想法",
+                "mood": "quiet",
+                "activities": [
+                    {"kind": "linger", "duration_s": 5},
+                    {"kind": "linger", "duration_s": 5},
+                ],
+                "avoid_targets": [],
+                "ttl_s": 60,
+            }, stale_token))
+            self.assertEqual(requests[-1]["context"]["recent_conversation"]["turns"], [])
+        finally:
+            self.session.remove_event_listener(director._on_session_event)
+
+    def test_observe_and_local_roam_compile_to_internal_terminal_operations(self) -> None:
+        observed = self.director._compile_intent_activity(
+            {"kind": "observe", "target_key": "b0", "duration_s": 12},
+            frozenset(),
+            self.clock(),
+        )
+        self.assertIsNotNone(observed)
+        observe_graph = observed[0]
+        self.assertTrue(any(node.get("type") == "look_at_target" for node in observe_graph["nodes"]))
+        BehaviorGraphCompiler(self.session).compile(observe_graph)
+
+        roamed = self.director._compile_intent_activity(
+            {"kind": "local_roam", "style": "meander", "duration_s": 15},
+            frozenset(),
+            self.clock(),
+        )
+        self.assertIsNotNone(roamed)
+        steps = [node for node in roamed[0]["nodes"] if node.get("type") == "move_relative"]
+        self.assertGreaterEqual(len(steps), 2)
+        self.assertTrue(all(0.5 <= node["distance_m"] <= 1.5 for node in steps))
+        BehaviorGraphCompiler(self.session).compile(roamed[0])
+
+    def test_route_cooldown_allows_one_strong_interest_override(self) -> None:
+        requests = []
+        director = AutonomyDirector(
+            self.adapter,  # type: ignore[arg-type]
+            self.session,  # type: ignore[arg-type]
+            self.config,
+            inspiration_callback=requests.append,
+            clock=self.clock,
+        )
+        director._desired_running = True
+        director._request_intent("startup")
+        signature = ("a0", "b0")
+        director._route_history[signature] = self.clock() + 600.0
+        self.assertTrue(director.offer_intent({
+            "motivation": "又想回窗边看看",
+            "mood": "curious",
+            "activities": [
+                {"kind": "visit", "target_key": "b0", "duration_s": 8},
+                {"kind": "linger", "duration_s": 8},
+            ],
+            "avoid_targets": [],
+            "interests": [{"target_key": "b0", "strength": 0.8, "ttl_s": 300}],
+            "ttl_s": 300,
+        }, requests[-1]["request_token"]))
+        director._activate_pending_intent(self.clock())
+        try:
+            allowed, override = director._route_admission(
+                signature, "b0", self.clock(), allow_interest_override=True
+            )
+            self.assertTrue(allowed)
+            self.assertEqual(override, "b0")
+            director._intent.used_route_overrides.add("b0")  # type: ignore[union-attr]
+            allowed_again, override_again = director._route_admission(
+                signature, "b0", self.clock(), allow_interest_override=True
+            )
+            self.assertFalse(allowed_again)
+            self.assertIsNone(override_again)
+        finally:
+            self.session.remove_event_listener(director._on_session_event)
+
+    def test_stale_intent_and_pause_cannot_reactivate_autonomy(self) -> None:
+        requests = []
+        director = AutonomyDirector(
+            self.adapter,  # type: ignore[arg-type]
+            self.session,  # type: ignore[arg-type]
+            self.config,
+            inspiration_callback=lambda request: requests.append(request),
+            clock=self.clock,
+        )
+        director._desired_running = True
+        director._request_intent("startup")
+        token = requests[-1]["request_token"]
+        director._request_intent("newer_event")
+        value = {
+            "motivation": "旧想法",
+            "mood": "quiet",
+            "activities": [
+                {"kind": "linger", "duration_s": 5},
+                {"kind": "linger", "duration_s": 5},
+            ],
+            "avoid_targets": [],
+            "ttl_s": 60,
+        }
+        self.assertFalse(director.offer_intent(value, token))
+        director.pause("manual_pause")
+        self.assertFalse(director.offer_intent(value, requests[-1]["request_token"]))
+        self.assertIsNone(director.status()["current_intent"])
+        self.session.remove_event_listener(director._on_session_event)
+
+    def test_social_event_requests_new_intent_without_waiting_for_model(self) -> None:
+        requests = []
+        director = AutonomyDirector(
+            self.adapter,  # type: ignore[arg-type]
+            self.session,  # type: ignore[arg-type]
+            self.config,
+            inspiration_callback=lambda request: requests.append(request),
+            clock=self.clock,
+        )
+        director._desired_running = True
+        self.session.emit({"type": "social.wave", "slot": 2})
+        self.assertEqual(requests[-1]["reason"], "social_event")
+        self.assertEqual(requests[-1]["context"]["trigger_event"]["player_slot"], 2)
+        self.assertEqual(director.status()["social_queue"], 1)
+        self.session.remove_event_listener(director._on_session_event)
+
+    def test_structured_telemetry_covers_intent_queue(self) -> None:
+        telemetry: list[dict[str, object]] = []
+        director = AutonomyDirector(
+            self.adapter,  # type: ignore[arg-type]
+            self.session,  # type: ignore[arg-type]
+            self.config,
+            inspiration_callback=lambda _request: None,
+            telemetry_callback=telemetry.append,
+            clock=self.clock,
+        )
+        director._desired_running = True
+        director._request_intent("startup")
+        token = director._latest_intent_token
+        self.assertIsInstance(token, str)
+        self.assertTrue(director.offer_intent({
+            "motivation": "想去窗边安静看看",
+            "mood": "quiet",
+            "activities": [
+                {"type": "visit", "target_key": "b0", "duration_s": 8},
+                {"type": "linger", "target_key": "b0", "duration_s": 8},
+            ],
+            "avoid_targets": [],
+            "ttl_s": 240,
+        }, token))
+        events = [item["event"] for item in telemetry]
+        self.assertIn("intent_requested", events)
+        self.assertIn("intent_queued", events)
+        def dispositions():
+            return [item["disposition"] for item in telemetry if item["event"] == "intent_disposition" and item["request_token"] == token]
+        self.assertEqual(dispositions(), ["queued"])
+        director._activate_pending_intent(self.clock())
+        self.assertEqual(dispositions(), ["queued", "active"])
+        self.clock.advance(241)
+        director._activate_pending_intent(self.clock())
+        self.assertEqual(dispositions(), ["queued", "active", "expired"])
+        director._request_intent("new_request")
+        self.assertFalse(director.offer_intent({"motivation": "旧输出", "mood": "quiet", "activities": []}, token))
+        self.assertEqual(dispositions()[-1], "superseded")
+        self.session.remove_event_listener(director._on_session_event)
+
+    def test_close_stops_background_thread(self) -> None:
+        director = AutonomyDirector(
+            self.adapter,  # type: ignore[arg-type]
+            self.session,  # type: ignore[arg-type]
+            YuiAutonomyConfig(enabled=True, decision_interval_s=0.01),
+        )
+        director.start()
+        time.sleep(0.03)
+        director.close()
+        self.assertIsNotNone(director._thread)
+        self.assertFalse(director._thread.is_alive())
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,23 @@
+{
+  "ffmpeg": {
+    "provider": "imageio-ffmpeg",
+    "version": "0.6.0",
+    "wheel": "imageio_ffmpeg-0.6.0-py3-none-win_amd64.whl",
+    "url": "https://files.pythonhosted.org/packages/2c/c6/fa760e12a2483469e2bf5058c5faff664acf66cadb4df2ad6205b016a73d/imageio_ffmpeg-0.6.0-py3-none-win_amd64.whl",
+    "wheel_sha256": "02fa47c83703c37df6bfe4896aab339013f62bf02c5ebf2dce6da56af04ffc0a",
+    "binary_sha256": "2ce797a0f88d7f067180338fb227f7b1928ea727bd9a4d7a1d022f7c52af71a3",
+    "bytes": 87638016
+  },
+  "cloudflared": {
+    "release": "2026.10.3",
+    "url": "https://github.com/cloudflare/cloudflared/releases/download/2026.10.3/cloudflared-windows-amd64.exe",
+    "sha256": "76b2805253d0d6ffacb092a7acfbee99e7af6917835c0c5410e23f3ef5052da2",
+    "bytes": 55329336
+  },
+  "license_files": {
+    "cloudflared-LICENSE": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd",
+    "FFmpeg-COPYING.GPLv3": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+    "FFmpeg-license-info.txt": "7ebfa8f4bc81429dc1376dcd220b41e4095d403166a290a0d1086bd0497c5ba8",
+    "LICENSE": "eca73421d0c905a92e952a553d4d58919c5a507c2c2c76e3c0cf9ba408c299e4"
+  }
+}

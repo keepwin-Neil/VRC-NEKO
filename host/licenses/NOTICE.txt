@@ -1,0 +1,14 @@
+YUI voice runtime dependencies
+
+FFmpeg 7.1, supplied by the pinned imageio-ffmpeg 0.6.0 Windows wheel.
+This build reports --enable-gpl --enable-version3. See FFmpeg-COPYING.GPLv3,
+FFmpeg-license-info.txt and the original wheel LICENSE (imageio-ffmpeg BSD).
+Upstream source: https://ffmpeg.org/releases/ffmpeg-7.1.tar.xz
+Binary build provider: https://www.gyan.dev/ffmpeg/builds/
+Acquisition URL, exact hashes and version: host/voice-dependencies.lock.json.
+
+cloudflared 2026.10.3, official Cloudflare release, Apache-2.0.
+See cloudflared-LICENSE. Source: https://github.com/cloudflare/cloudflared/tree/2026.10.3
+
+These tools run as hidden child processes, use synthetic black video and YUI
+TTS PCM only, and are stopped with the plugin. No microphone or screen capture.

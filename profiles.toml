@@ -1,0 +1,5 @@
+# 使用通用默认配置，不自动叠加本机测试档。
+[config_profiles]
+active = ""
+
+[config_profiles.files]
