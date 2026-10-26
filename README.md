@@ -1,82 +1,97 @@
-# VRC-NEKO · YUI 世界 NPC
+# VRC-NEKO: an AI NPC that lives in a VRChat world
 
-VRC-NEKO 是 **Project N.E.K.O 的官方附属项目**，面向 VRChat 世界 NPC 集成。目标是让 AI 角色在世界里交流、移动、表达身体动作，并根据地图作者提供的语义和导航约束行动。本项目由 [keepwin-Neil](https://github.com/keepwin-Neil) 的个人 GitHub 账号发布，目前由其持续维护。
+[中文说明](README.zh-CN.md)
 
-这是 **0.5.19 本地工程的公开源码整理版**（整理日期：2026-10-26），包含插件、协议、控制面板、Unity/Udon C# 源码及自动测试。它处于持续联调阶段，**不是完整地图、可直接导入的角色包或已经完成多人验收的成品**。
+VRC-NEKO connects YUI, the AI character of [Project N.E.K.O.](https://github.com/Project-N-E-K-O/N.E.K.O), to a VRChat world. It lets her talk with players, move around the world and express herself through body motion, guided by the semantic and navigation information the world author provides. VRC-NEKO is an official affiliated project of Project N.E.K.O. It is published from my personal GitHub account, [keepwin-Neil](https://github.com/keepwin-Neil), and I maintain it.
 
-## 项目简介
+This repository is a public source snapshot of local version **0.5.19** (prepared on 26 October 2026). It contains the plugin, the protocol, the control panel, the Unity/Udon C# scripts and the automated tests. It is a prototype that is still being integrated and tested. It is **not** a finished world, a ready-to-import character package, or a product validated with multiple players.
+
+## How it works
 
 ```mermaid
 flowchart LR
-    Player[玩家文字或主动语音输入] --> World[世界 Udon 与会话校验]
-    World -->|结构化日志与回执| Plugin[YUI NPC 插件]
-    Plugin --> Host[N.E.K.O 对话与记忆宿主]
-    Plugin --> Intent[独立动作意图模型]
-    Intent --> Motion[外部 ARDY 动作服务]
-    Motion -->|姿态流| Plugin
+    Player[Player text or opt-in voice input] --> World[World Udon and session checks]
+    World -->|Structured logs and receipts| Plugin[YUI NPC plugin]
+    Plugin --> Host[N.E.K.O. conversation and memory host]
+    Plugin --> Intent[Separate action-intent model]
+    Intent --> Motion[External ARDY motion service]
+    Motion -->|Pose stream| Plugin
     Plugin -->|MIDI| World
-    Host -->|字幕与 TTS| Plugin
-    Plugin -->|外部 HLS| Voice[世界 AVPro 空间音源]
+    Host -->|Subtitles and TTS| Plugin
+    Plugin -->|External HLS| Voice[World AVPro spatial audio]
 ```
 
-世界端负责权限、会话、导航、骨骼播放和实际完成/失败回执；桌面端负责事件处理、行为编排、连续动作传输和故障恢复。当前环境理解依赖结构化语义与导航信息，**没有完成 AI 视觉理解闭环**。EyeCam 和跟拍相机代码不等于 AI 已能看见世界。
+- **The world side** handles permissions, sessions, navigation, skeleton playback, and reports whether each action actually completed or failed.
+- **The desktop side** handles events, behavior orchestration, continuous motion streaming and failure recovery.
+- **Motion generation** uses the [official NVIDIA ARDY implementation](https://github.com/nv-tlabs/ardy). This repository contains only the adapter that connects to it. It does not redistribute ARDY models, weights or upstream code.
 
-动作生成模型使用 [NVIDIA ARDY 官方实现](https://github.com/nv-tlabs/ardy)。本仓库只保留连接该后端的服务适配层，**不重新发布 ARDY 模型、权重、上游完整代码或修改后的上游覆盖文件**。模型、文本编码器及其授权由使用者从原始发布方获取。
+The character currently understands her surroundings through structured semantic and navigation data. AI vision is **not** yet working end to end: the eye-camera and follow-camera code does not mean the AI can see the world.
 
-## 发布与维护
+## Reporting what actually happened
 
-本项目以 N.E.K.O 官方附属项目的身份发布，公开仓库位于个人账号 [keepwin-Neil/VRC-NEKO](https://github.com/keepwin-Neil/VRC-NEKO)，当前维护者为 [keepwin-Neil](https://github.com/keepwin-Neil)。
+A design rule runs through the project: **a generated action is not the same as an executed action.** The world sends back a receipt saying whether each action really completed or failed, and the plugin treats "the model produced a motion" and "the character actually did it" as two different results. The known issues below are listed openly for the same reason.
 
-相关致谢集中列于本文的“致谢”部分，外部依赖、资源范围与许可说明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+## History and my role
 
-## AI 辅助开发说明
+- **Versions up to 0.5.14 (30 August – 14 September 2026)** were co-developed with [ggg233m](https://github.com/ggg233m) and published in his [YUI NPC Controller](https://github.com/ggg233m/n.e.k.o_plugin_vrc_npc_controller) repository. That repository includes code I wrote, and contributions from this period cannot be separated file by file.
+- **From version 0.5.15 onwards**, upgrades, optimization and maintenance have been mainly my work. This repository is the version I prepared and maintain independently.
 
-项目在代码实现、重构、测试、调试、文档和本次公开整理中使用了 AI 编程助手，包括 Codex。AI 生成的代码与解释可能存在错误；自动测试、构建成功和 AI 的判断均不能替代 VRChat 实机、多人与长时间验收。
+My role covers the requirements and scope of the world NPC, feature decisions and trade-offs, integration with the Unity world, local deployment and debugging, verification of behavior, and decisions on what to publish. The integration work in this version includes:
 
-## 当前状态与已知问题
+- connecting N.E.K.O. to world events;
+- adapting the separate action-intent model and the continuous motion service;
+- subtitles and player input;
+- spatial voice output and opt-in player speech leases;
+- the control panel;
+- session recovery;
+- regression testing.
 
-以下状态结合本地源码和截至 2026-10-26 的交接记录；本次公开整理没有启动真实模型、调用付费 API、播放音频或执行 VRChat Local Test。
+Much of the implementation was written with AI coding assistants (see below). This list describes the scope of the integration work. It does not mean that every line in these folders was written by me from scratch.
 
-| 部分 | 当前状态与验证边界 |
+## Current status
+
+Status as of 26 October 2026. Preparing this public snapshot did not involve running real models, paid APIs, audio playback or VRChat Local Test.
+
+| Area | Status and limits of verification |
 |---|---|
-| MIDI、日志回执、会话与控制权 | 已实现并有自动测试和历史客户端记录；最新版本完整实机回归仍未完成 |
-| ARDY 连续动作 | 有真实模型生成、传输和历史世界执行证据；路径约束失败、动作质量、脚滑与抖动未完整解决 |
-| 字幕、文字输入、陪伴与主动搭话 | 代码与测试存在；新版 VR 双眼观感、阅读体验、真实 WASD/鼠标/VR 操作和多人体验待验收 |
-| 空间语音输出 | TTS→HLS→AVPro 链路已实现；历史出现 HTTP 530 和 `PlayerError`，尚无完整的多人播放及空间听感验收 |
-| 玩家麦克风输入 | 0.5.19 已实现并有本地构建/自动验证记录；对应新世界未上传，真实多人麦克风未验收 |
-| 视觉、跨设备与平台 | 尚无已验证 AI 视觉闭环；Quest、PCVR、macOS 与跨机器部署不能视为已支持 |
+| MIDI, log receipts, sessions and control | Implemented, with automated tests and earlier client records; a full live regression of the latest version is not yet done |
+| ARDY continuous motion | Real generation, transport and earlier in-world execution recorded; path-constraint failures, motion quality, foot sliding and jitter not fully solved |
+| Subtitles, text input, companionship and proactive conversation | Code and tests exist; VR readability, real keyboard/mouse/VR controls and multiplayer experience still to be tested |
+| Spatial voice output | TTS → HLS → AVPro pipeline implemented; HTTP 530 and `PlayerError` seen earlier; no full multiplayer or spatial-audio test yet |
+| Player microphone input | Implemented in 0.5.19 with local build and automated checks; the matching world is not uploaded and real multiplayer microphone use is untested |
+| Vision, devices and platforms | No verified AI vision loop; support for Quest, PCVR, macOS and multi-machine setups has not been validated |
 
-仍需明确保留的故障和限制：
+## Known issues
 
-- `stream_path_constraint` 曾导致后端持续生成而世界执行失败，具体触发分支尚未定位；生成成功不代表世界执行成功。
-- 动作意图 API 延迟存在波动，历史记录有数秒及约 10.7 秒的异常延迟，不承诺一秒内动作响应。当前提示词仍会将后空翻请求改为拒绝或为难动作，这不是 ARDY 无法生成该动作的证明。
-- YUI 插件曾出现 `crashed` 并在重启后恢复，根因未解决。世界/客户端无响应、UnityPlayer 原生崩溃及系统蓝屏也有历史记录；彼此是否相关尚未证实，不能直接归责于语音、地图或显卡驱动。
-- Unity 异步构建曾出现 PlayerLoop 递归错误；后续构建成功不能证明根因已永久消除。
-- 玩家语音输入捕获的是 VRChat 进程的混音，采用主动发言租约与 Windows 离线识别；不是声纹认证，不能可靠分离多人或模型音效。强制终止后的临时音频残留仍需检查。
-- 30 分钟以上稳定性、ownership 交接、晚加入、多人语音与同步尚无完整验收。记忆写盘和动作上下文延迟、历史 `action_busy` 与宿主路由噪声也没有最新逐项关闭证据。
-- 语义地图、NavMesh、角色、字体及 Inspector 引用没有打包。部分 Editor 工具仍约定旧的资产名称和相对路径，需要使用者准备获授权资源并自行适配。
-- 当前动作服务适配器包含本地后端扩展接口，**不能保证与未修改的官方 ARDY 直接兼容**；图重放、NF4 服务与完整安装器不在此公开版内。详见 [后端接入边界](integrations/motion_service/README.md)。
+- `stream_path_constraint` has caused the backend to keep generating while execution in the world failed. The exact trigger has not been found. Successful generation does not mean successful execution.
+- Latency of the action-intent API varies. Delays of several seconds, including an abnormal delay of about 10.7 seconds, have been recorded, so sub-second responses are not promised. The current prompt redirects backflip requests into refusal or hesitant motions; this is not evidence that ARDY cannot generate a backflip.
+- The YUI plugin has crashed and recovered after a restart; the root cause is unknown. World/client freezes, native UnityPlayer crashes and system blue screens have also been recorded. Whether these are related has not been established.
+- Unity asynchronous builds once hit a PlayerLoop recursion error. Later successful builds do not prove the root cause is gone for good.
+- Player voice input captures the mixed audio of the VRChat process and uses an explicit speaking lease with offline Windows recognition. It is not speaker verification and cannot reliably separate several players or model audio. Cleanup of temporary audio after forced termination still needs checking.
+- Stability over 30 minutes, ownership handover, late joiners, multiplayer voice and synchronization have not been fully tested. Memory-write and motion-context delays, earlier `action_busy` events and host-routing noise also lack a complete latest-version closure check.
+- The semantic map, NavMesh, characters, fonts and Inspector references are not included. Some Editor tools still expect the old asset names and paths.
+- The motion-service adapter includes local backend extensions, so it is **not guaranteed** to work with an unmodified official ARDY. See [integrations/motion_service/README.md](integrations/motion_service/README.md) (in Chinese).
 
-本次公开副本离线验证为 **567 项 Python 测试通过、5 项跳过、357 项子测试通过，7 项 Node 测试通过**。历史测试与本次结果的边界记录在 [验证说明](Docs/VALIDATION.md)，这些结果不等于真实多人或原生辅助程序验收通过。
+## Testing
 
-## 仓库内容
+Offline checks on this public snapshot: **567 Python tests passed, 5 skipped, 357 subtests passed; 7 Node tests passed.** The 5 skipped tests need Windows native helpers that are not distributed. These results do not replace live multiplayer testing. Details are in [Docs/VALIDATION.md](Docs/VALIDATION.md) (in Chinese).
 
-| 路径 | 内容 |
+## Repository layout
+
+| Path | Contents |
 |---|---|
-| `runtime/`、`__init__.py` | 插件运行时、会话、意图、行为执行、动作流及语音协调 |
-| `ui/` | N.E.K.O 插件控制面板源码 |
-| `unity/` | 世界端 C# 和相应脚本 `.meta`；不含完整 Unity 工程 |
-| `Docs/Protocols/` | YUI 协议、常量与合成测试向量 |
-| `integrations/motion_service/` | 本机动作服务与外部模型适配器 |
-| `host/` | 前端语音桥接、Windows 识别/进程音频辅助程序源码与依赖清单 |
-| `tests/` | 运行时、协议和源码契约回归测试 |
-| `scripts/check_public_release.py` | 精确扫描暂存内容与全部可达历史的发布检查 |
+| `runtime/`, `__init__.py` | Plugin runtime: sessions, intent, behavior execution, motion streaming and voice coordination |
+| `ui/` | N.E.K.O. plugin control panel |
+| `unity/` | World-side C# scripts and their `.meta` files; not a full Unity project |
+| `Docs/Protocols/` | YUI protocol, constants and synthetic test vectors |
+| `integrations/motion_service/` | Local motion service and adapter for the external model |
+| `host/` | Frontend voice bridge, source of the Windows recognition and process-audio helpers, dependency list |
+| `tests/` | Regression tests for the runtime, protocol and source contracts |
+| `scripts/check_public_release.py` | Release check that scans staged content and all reachable history |
 
-## 开发与安装边界
+## Getting started
 
-建议先阅读 [Unity 接入说明](unity/README.md) 和 [后端说明](integrations/motion_service/README.md)。此公开版提供开发源码，不提供已经验证的一键安装流程。
-
-插件元数据要求 **Python 3.11**。在独立开发环境中安装基础依赖并运行测试：
+This snapshot provides development source code, not a verified one-click installer. The plugin requires **Python 3.11**.
 
 ```bash
 python -m pip install -e ".[dev]"
@@ -84,25 +99,15 @@ python run_tests.py -q
 node --test host/yui-voice-relay.test.cjs
 ```
 
-`run_tests.py` 使用隔离的宿主 SDK 回退，避免导入机器上已安装的 N.E.K.O 并读取其个人设置。部分测试需要本机回环 HTTP 和临时子进程权限；原生二进制未准备时，相应 Windows 集成测试会跳过。
+To run the plugin inside the host, install [Project N.E.K.O.](https://github.com/Project-N-E-K-O/N.E.K.O) separately and deploy this folder as `plugin/plugins/yui_npc_controller/`. Voice output, voice input and ARDY are all off by default in `config.example.toml`. Never put keys into tracked files. The motion service listens only on the local loopback address and must not be exposed to the internet. Full setup notes, including Unity and voice dependencies, are in the [Chinese README](README.zh-CN.md).
 
-运行宿主插件还需独立安装 [Project N.E.K.O](https://github.com/Project-N-E-K-O/N.E.K.O)，按其插件 SDK 流程将本目录部署为 `plugin/plugins/yui_npc_controller/`，并由宿主安装依赖。`pip install -e .` 主要服务于独立运行时/MCP 开发，不能自动完成宿主前端桥接、Unity 配置或 GPU 后端部署。宿主 API、前端补丁、SDK 和 Unity/Worlds SDK 版本需要自行核对；历史工程使用 Unity 2022.3.22f1，这不是对当前 VRChat SDK 版本要求的声明。
+## What is not included
 
-`config.example.toml` 是通用模板，语音输出、语音输入、ARDY 均默认关闭；自动启用自主循环还需世界能力和正确 MIDI/日志配置。将个人设置保存在宿主管理的本地配置或忽略的本地文件中，**不要将密钥填进已跟踪模板再提交**。MIDI claim code 是示例会话配对值，不能作为安全认证机制。
+Paid or third-party assets, worlds, character models, scenes, fonts, animations, materials, weights, datasets, `.vrcw`/`.vrca` files, installers, raw logs, chat memory, backups and the old Git history. The public copy starts from a new, clean history so that none of this is carried over. For this reason, the commit history of this repository does not show who wrote which code.
 
-语音功能的 FFmpeg、cloudflared 与 Windows 辅助程序需要单独准备。`host/fetch_voice_dependencies.py` 可按固定下载地址与 SHA256 获取第三方工具到忽略的 `vendor/voice/`；本仓库未运行该下载，也不包含二进制。编译 Windows 辅助程序时为 `host/build_windows_speech.py` 显式提供 `--compiler`、`--dotnet` 与 `--output`，不要提交生成的机器路径清单。
+## Public release checks
 
-动作服务只监听本机回环地址，采用本机信任边界；不能将其直接暴露到公网。启用外部 AI 服务会按配置发送对话或动作上下文；启用空间语音公网隧道会使持有播放地址者有机会访问实时音频。默认不包含玩家显示名，语音输入须经玩家主动申请。
-
-## 演示视频
-
-本次没有加入演示视频：尚未取得同时通过隐私、第三方素材展示权和内容真实性核验的录像。不会用上游 ARDY 演示或模拟动画冒充本项目的实际运行效果。后续可附经审核的 30–60 秒实机录像，分别展示文字交互、动作请求、实际执行与失败反馈，并标注版本、录制环境和语音验收边界。
-
-## 公开范围与安全检查
-
-不包含付费/第三方资产、世界或角色模型、场景、字体、动画/材质、权重、数据集、`.vrcw`/`.vrca`、插件安装包、原始日志、聊天记忆、备份、压缩归档、崩溃转储或旧 Git 历史。地图布局和资产提取相关的本地 Editor 工具也没有导出。原始交接文档含本机信息，只保留脱敏后的状态说明。
-
-`.gitignore` 采用源文件白名单并补充敏感内容排除规则；`git add -f`、已有跟踪文件和历史仍能绕过忽略规则，因此发布前运行：
+The source allowlist in `.gitignore` excludes private data and assets. Before publishing a change, scan the exact staged content and reachable history:
 
 ```bash
 git add .
@@ -110,18 +115,24 @@ python scripts/check_public_release.py --staged
 python scripts/check_public_release.py --all-history
 ```
 
-尚未暂存时可先执行 `python scripts/check_public_release.py --working-tree`，只检查公开策略允许的候选文件；此模式不能替代暂存和历史扫描。
+Before staging, `python scripts/check_public_release.py --working-tree` checks files admitted by the public-source policy. Static checks cannot detect every possible secret format; review the changes and follow [SECURITY.md](SECURITY.md) as well.
 
-自动检查覆盖常见密钥格式、凭据字面量、VRC 标识、个人主目录、私网地址、二进制和超出公开范围的文件；检查只输出文件名、行号及类别。静态规则不能证明不存在未知格式的秘密，发布者仍应复核变更和外部链接。安全问题处理见 [SECURITY.md](SECURITY.md)。
+## Demo
 
-## 致谢
+No live demo video has yet been cleared for privacy, asset-display rights and accuracy. An upstream ARDY demo or simulated animation will not be presented as this project's live results. The [Chinese README](README.zh-CN.md#演示视频) describes the planned recording scope.
 
-- [ggg233m](https://github.com/ggg233m)：感谢对本项目的支持与贡献；相关项目见 [VRChat body 插件](https://github.com/ggg233m/n.e.k.o_plugin_vrc_body) 与 [YUI NPC Controller](https://github.com/ggg233m/n.e.k.o_plugin_vrc_npc_controller)。
-- [Project N.E.K.O 团队](https://github.com/Project-N-E-K-O) 和 [N.E.K.O 项目](https://github.com/Project-N-E-K-O/N.E.K.O)：感谢对本项目的支持及相关生态建设。
-- [wehos](https://github.com/wehos)：感谢在 N.E.K.O 及相关生态中的贡献。
-- [NVIDIA ARDY 作者及团队](https://github.com/nv-tlabs/ardy)：提供动作生成研究与官方实现；代码和模型资源分别适用各自的许可。
-- VRChat、UdonSharp、Unity，以及 MIDI、语音和依赖工具的作者与社区。
+## AI-assisted development
 
-## 权利与许可
+AI coding assistants, including Codex, were used for implementation, refactoring, testing, debugging, documentation and preparing this release. I set the goals, chose between approaches, provided the environment and feedback, and verified the behavior. AI-generated code and explanations can be wrong. Automated tests, successful builds and AI judgments do not replace live, multiplayer and long-duration testing in VRChat.
 
-项目的版权署名与许可证遵循 N.E.K.O 官方的发布安排，外部依赖保留各自的版权和许可声明，包括 `host/licenses/` 中的材料。本仓库目前未为全部源码统一标注 MIT/Apache 许可；具体使用、修改、再分发和商用条件，以适用的许可证与官方发布说明为准。详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+## Acknowledgements
+
+- [ggg233m](https://github.com/ggg233m), co-developer of the early versions, for his support and contributions; see his [VRChat body plugin](https://github.com/ggg233m/n.e.k.o_plugin_vrc_body) and [YUI NPC Controller](https://github.com/ggg233m/n.e.k.o_plugin_vrc_npc_controller).
+- The [Project N.E.K.O. team](https://github.com/Project-N-E-K-O) and the [N.E.K.O. project](https://github.com/Project-N-E-K-O/N.E.K.O), for supporting this project and building the ecosystem.
+- [wehos](https://github.com/wehos), for contributions to N.E.K.O. and its ecosystem.
+- The [NVIDIA ARDY authors and team](https://github.com/nv-tlabs/ardy), for the motion-generation research and official implementation.
+- VRChat, UdonSharp, Unity, and the authors of the MIDI, voice and other tools used here.
+
+## License
+
+Copyright attribution and licensing follow Project N.E.K.O.'s official release arrangements. External dependencies keep their own copyright and license notices, including the files in `host/licenses/`. The source code in this repository is not yet released under a single MIT or Apache license. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) (in Chinese).
