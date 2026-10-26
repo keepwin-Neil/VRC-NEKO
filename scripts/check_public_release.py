@@ -10,7 +10,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 ROOT_FILES = {
-    '.gitignore', '.gitattributes', 'README.md', 'README.zh-CN.md', 'SECURITY.md', 'THIRD_PARTY_NOTICES.md',
+    '.gitignore', '.gitattributes', 'LICENSE', 'README.md', 'README.zh-CN.md', 'SECURITY.md', 'THIRD_PARTY_NOTICES.md',
     'pyproject.toml', 'plugin.toml', 'profiles.toml', 'config.example.toml',
     'pytest.ini', 'run_tests.py', 'run_tests.bat', '__init__.py', 'mcp_server.py',
 }

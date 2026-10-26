@@ -135,4 +135,4 @@ AI coding assistants, including Codex, were used for implementation, refactoring
 
 ## License
 
-Copyright attribution and licensing follow Project N.E.K.O.'s official release arrangements. External dependencies keep their own copyright and license notices, including the files in `host/licenses/`. The source code in this repository is not yet released under a single MIT or Apache license. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) (in Chinese).
+Unless otherwise noted, this project's source code is licensed under the [Apache License, Version 2.0](LICENSE). Existing copyright and attribution notices are retained. Third-party materials and external dependencies remain under their respective licenses, including the notices in `host/licenses/`. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) (in Chinese).

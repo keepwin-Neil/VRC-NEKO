@@ -135,4 +135,4 @@ python scripts/check_public_release.py --all-history
 
 ## 权利与许可
 
-项目的版权署名与许可证遵循 N.E.K.O 官方的发布安排，外部依赖保留各自的版权和许可声明，包括 `host/licenses/` 中的材料。本仓库目前未为全部源码统一标注 MIT/Apache 许可；具体使用、修改、再分发和商用条件，以适用的许可证与官方发布说明为准。详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+除另有说明的文件外，本项目源码采用 [Apache License 2.0](LICENSE) 发布，并保留既有版权和署名声明。第三方材料和外部依赖继续适用各自的许可证，包括 `host/licenses/` 中的声明。详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
